@@ -1,4 +1,5 @@
 import streamlit as st
+import EDA
 import stock
 
 def sidebar_nagivation():
@@ -7,6 +8,9 @@ def sidebar_nagivation():
         st.session_state["session"]="EDA"
     if st.sidebar.button('Stock'):
         st.session_state["session"]="Stock"
+        
+    
+    st.sidebar.title('Options')
 
 def run():
     st.set_page_config(layout='wide')
@@ -17,8 +21,7 @@ def run():
     if st.session_state.get("session","Stock") == "Stock":
         stock.main()
     if st.session_state.get("session","Stock") == "EDA":
-        st.title("EDA")
-        st.write("EDA is not implemented yet.")
+        EDA.main()
     
 if __name__ == "__main__":
     run()
