@@ -4,15 +4,18 @@ import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
-def load_data(stock):
-    """데이터를 로드하고 전처리합니다."""
+import stock
+from statsmodels.tsa.seasonal import seasonal_decompose
+import openai
+ 
+def load_data(stock): 
+    """데이터를 로드하고 전처리합니다."""  
     data = yf.download(stock)
     data.columns = [' '.join(col)[:-(len(stock)+1)] for col in data.columns]
     data.reset_index(inplace=True)
     
     data['Date'] = pd.to_datetime(data['Date'])
-    data['SMA_5'] = data['Close'].rolling(window=5).mean()
+    data['SMA_5'] = data['Close'].rolling(window=5).mean() 
     data['SMA_20'] = data['Close'].rolling(window=20).mean()
     data['SMA_60'] = data['Close'].rolling(window=60).mean()
     data['SMA_120'] = data['Close'].rolling(window=120).mean()
@@ -143,7 +146,7 @@ def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120, show_b
     
     ################
     ### RSI
-    ################
+    ################ 
     
     # RSI 라인
     fig.add_trace(go.Scatter(
@@ -276,5 +279,14 @@ def main():
     else:
         st.warning("CSV 파일을 업로드하여 시각화할 수 있습니다.")
 
-if __name__ == "__main__":
-    main()
+
+
+
+
+
+
+
+ 
+
+
+ 
