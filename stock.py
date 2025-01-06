@@ -54,22 +54,32 @@ def filter_data_by_date(data, start_date, end_date):
     end_date = pd.to_datetime(end_date)
     return data[(data['Date'] >= start_date) & (data['Date'] <= end_date)]
 
+def show_stock_name(symbol):
+    try:
+        stock_name = yf.Ticker(symbol).info['longName']
+        st.markdown(f"""
+            <h1>
+            {stock_name}
+            </h1>
+            """, unsafe_allow_html=True)
+    except KeyError:
+        return "종목 코드가 잘못되었거나 이름을 찾을 수 없습니다."
+
 def show_stock_price(data):
     yesterday_close = data['Close'].iloc[-2]
     today_close = data['Close'].iloc[-1]
     change = today_close - yesterday_close
     change_percent = (change / yesterday_close) * 100
 
-
-    # 전일 종가 표시 (빨간색, 헤더 1 스타일)
     color = 'red' if change > 0 else 'blue' if change < 0 else 'black'
+    symbol = '▲' if change > 0 else '▼' if change < 0 else ''
+    
     st.markdown(f"""
-            <h1 style='color:{color}; display:inline;'>
-            {data['Close'].iloc[-1]:.2f}
-            </h1>
-            <h2 style='color:{color}; display:inline;'>
-            {change:.2f} ({change_percent:.2f}%)
-            </h2>
+            <div style="display: flex; align-items: baseline;">
+                <h1 style='color:{color}; display:inline;'> {data['Close'].iloc[-1]:.2f} </h1>
+                <h3 style='color:{color}; display:inline;'> {symbol} {abs(change):.2f} </h3>
+                <h3 style='color:{color}; display:inline;'> {change_percent:.2f}% </h3>
+            </div>
             """, unsafe_allow_html=True)
 
 
@@ -205,18 +215,19 @@ def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120, show_b
 
 def main():
     """Streamlit 앱의 메인 함수입니다."""
-    st.title("S&P 500 Visualization with Moving Averages")
-    
-    stock = st.text_input("주식 코드를 입력하세요", value='^GSPC')
+    stock = st.sidebar.text_input("주식 코드를 입력하세요", value='^GSPC')
     
     if stock is not None:
         data = load_data(stock)
         
+        show_stock_name(stock)
         show_stock_price(data)
+        
+        st.divider()
 
         # 날짜 범위 필터링
         max_date = data['Date'].max()
-        start_date = max_date - pd.DateOffset(years=3)
+        start_date = max_date - pd.DateOffset(years=1)
         end_date = data['Date'].max()
         
         col1, col2, col3, col4, col5, col6, col7 = st.columns(7)
