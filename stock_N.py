@@ -231,7 +231,7 @@ def main():
         with col2:
             if st.button('최근 3달'):
                 start_date = max_date - pd.DateOffset(months=3)
-                end_date = data['Date'].max()
+                end_date = data['Date'].max() 
         with col3:
             if st.button('최근 6달'):
                 start_date = max_date - pd.DateOffset(months=6)
@@ -240,7 +240,7 @@ def main():
             if st.button('최근 1년'):
                 start_date = max_date - pd.DateOffset(years=1)
                 end_date = data['Date'].max()
-        with col5:
+        with col5: 
             if st.button('최근 3년'):
                 start_date = max_date - pd.DateOffset(years=3)
                 end_date = data['Date'].max()
