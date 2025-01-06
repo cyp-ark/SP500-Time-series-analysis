@@ -17,8 +17,22 @@ def load_data(stock):
     data['SMA_60'] = data['Close'].rolling(window=60).mean()
     data['SMA_120'] = data['Close'].rolling(window=120).mean()
     
+    data['SMA_20_STD'] = data['Close'].rolling(window=20).std()
+    
+    data['Upper Band'] = data['SMA_20'] + (data['SMA_20_STD'] * 2)
+    data['Lower Band'] = data['SMA_20'] - (data['SMA_20_STD'] * 2)
+    
     # Calculate RSI and add it to the data
     data['RSI'] = calculate_rsi(data)
+    data['RSI_SMA'] = data['RSI'].rolling(window=5).mean()
+    
+    data['Cross'] = 0  # 교차 여부를 저장하는 열 (1: 상승, -1: 하락)
+    for i in range(1, len(data)):
+        if data['RSI'].iloc[i] > data['RSI_SMA'].iloc[i] and data['RSI'].iloc[i-1] <= data['RSI_SMA'].iloc[i-1]:
+            data.loc[i, 'Cross'] = 1  # 상승 교차
+        elif data['RSI'].iloc[i] < data['RSI_SMA'].iloc[i] and data['RSI'].iloc[i-1] >= data['RSI_SMA'].iloc[i-1]:
+            data.loc[i, 'Cross'] = -1  # 하락 교차
+    
     return data
 
 def calculate_rsi(data, period=14):
@@ -40,10 +54,29 @@ def filter_data_by_date(data, start_date, end_date):
     end_date = pd.to_datetime(end_date)
     return data[(data['Date'] >= start_date) & (data['Date'] <= end_date)]
 
-def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120):
+def show_stock_price(data):
+    yesterday_close = data['Close'].iloc[-2]
+    today_close = data['Close'].iloc[-1]
+    change = today_close - yesterday_close
+    change_percent = (change / yesterday_close) * 100
+
+
+    # 전일 종가 표시 (빨간색, 헤더 1 스타일)
+    color = 'red' if change > 0 else 'blue' if change < 0 else 'black'
+    st.markdown(f"""
+            <h1 style='color:{color}; display:inline;'>
+            {data['Close'].iloc[-1]:.2f}
+            </h1>
+            <h2 style='color:{color}; display:inline;'>
+            {change:.2f} ({change_percent:.2f}%)
+            </h2>
+            """, unsafe_allow_html=True)
+
+
+def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120, show_bollinger):
     """Close 가격, SMA, Volume을 포함한 Plotly 서브플롯 그래프를 생성합니다."""
     
-    # 2x1 서브플롯 생성
+    # 3x1 서브플롯 생성
     fig = make_subplots(rows=3, cols=1, shared_xaxes=True, 
                         row_heights=[0.6, 0.2, 0.2],
                         vertical_spacing=0.1)
@@ -76,6 +109,24 @@ def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120):
             line=dict(color='#9BBB6B', width=1)
         ), row=1, col=1)
         
+    # 볼린저밴드
+    if show_bollinger:
+        # 상단 밴드 추가
+        fig.add_trace(go.Scatter(
+            x=data['Date'], y=data['Upper Band'], mode='lines', name='Upper Band',
+            line=dict(color='green', width=1, dash='dash')
+        ),row=1, col=1)
+
+        # 하단 밴드 추가
+        fig.add_trace(go.Scatter(
+            x=data['Date'], y=data['Lower Band'], mode='lines', name='Lower Band',
+            line=dict(color='green', width=1, dash='dash')
+        ),row=1, col=1)
+        
+    ################
+    ### Volume
+    ################
+        
     # Volume 컬러 설정
     volume_colors = ['#5174E3']  # 첫 번째 값은 기본적으로 파란색
     for i in range(1, len(data)):
@@ -90,11 +141,38 @@ def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120):
         marker=dict(color=volume_colors)
     ), row=2, col=1)
     
-    # RSI 라인 추가
+    ################
+    ### RSI
+    ################
+    
+    # RSI 라인
     fig.add_trace(go.Scatter(
         x=data['Date'], y=data['RSI'], mode='lines', name='RSI',
         line=dict(color='#EB6239', width=1)
     ), row=3, col=1)
+    
+    # RSI SMA 라인
+    fig.add_trace(go.Scatter(
+            x=data['Date'], y=data['RSI_SMA'], mode='lines', name='RSI SMA',
+            line=dict(color='#78A1DA', width=1)
+    ), row=3, col=1)
+    
+    # 교차점에 화살표 추가
+    for i, row in data.iterrows():
+        if row['Cross'] == -1:  # 상승 교차
+            fig.add_annotation(
+                x=row['Date'], y=row['RSI'],
+                text='', showarrow=True, arrowhead=1, arrowsize=1,
+                arrowcolor='#78A1DA', ax=0, ay=-10,
+                xref='x3', yref='y3'
+            )
+        elif row['Cross'] == 1:  # 하락 교차
+            fig.add_annotation(
+                x=row['Date'], y=row['RSI'],
+                text='', showarrow=True, arrowhead=1, arrowsize=1,
+                arrowcolor='#EB6239', ax=0, ay=10,
+                xref='x3', yref='y3'
+            )
     
     # RSI의 30, 70 수준을 나타내는 수평선 추가
     fig.add_shape(
@@ -118,7 +196,8 @@ def create_plot(data, show_sma_5, show_sma_20, show_sma_60, show_sma_120):
         yaxis2=dict(title='Volume'),
         xaxis3=dict(title='Date'),  # 하단 x축
         yaxis3=dict(title='RSI',
-                    tickvals=[30, 70]),  # y축 설정 (RSI)
+                    tickvals=[30, 70]),  # y축 설정 (RSI),
+        showlegend=False
     )
 
     return fig
@@ -132,6 +211,8 @@ def main():
     
     if stock is not None:
         data = load_data(stock)
+        
+        show_stock_price(data)
 
         # 날짜 범위 필터링
         max_date = data['Date'].max()
@@ -183,13 +264,14 @@ def main():
                 st.warning("선택한 날짜 범위에 데이터가 없습니다.")
             else:
                 # 각 SMA에 대한 체크박스 추가
-                col1, col2, col3, col4 = st.columns(4)
+                col1, col2, col3, col4, col5 = st.columns(5)
                 with col1 : show_sma_5 = st.checkbox("5일 단순이동평균", value=False)
-                with col2 : show_sma_20 = st.checkbox("20일 단순이동평균", value=False)
+                with col2 : show_sma_20 = st.checkbox("20일 단순이동평균", value=True)
                 with col3 : show_sma_60 = st.checkbox("60일 단순이동평균", value=False)
                 with col4 : show_sma_120 = st.checkbox("120일 단순이동평균", value=False)
+                with col5 : show_bollinger = st.checkbox("볼린저 밴드", value=True)
                 
-                fig = create_plot(filtered_data, show_sma_5, show_sma_20, show_sma_60, show_sma_120)
+                fig = create_plot(filtered_data, show_sma_5, show_sma_20, show_sma_60, show_sma_120, show_bollinger)
                 st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("CSV 파일을 업로드하여 시각화할 수 있습니다.")
