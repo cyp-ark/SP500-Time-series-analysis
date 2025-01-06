@@ -13,8 +13,8 @@ def sidebar_navigation():
     if st.sidebar.button('EDA'):
         st.session_state["session"] = "EDA_N"
     if st.sidebar.button('Stock'):  
-        st.session_state["session"] = "stock_N" 
- 
+        st.session_state["session"] = "stock_N"  
+  
 def decompose_and_plot(data): 
     """시계열 데이터를 분해하고 결과를 Plotly로 시각화합니다."""
     decomposition = seasonal_decompose(data['Close'], model='additive', period=20)
@@ -78,17 +78,20 @@ def eda_page():
             st.write(interpretation)
     else:
         st.warning("데이터를 불러올 수 없습니다. 올바른 주식 코드를 입력하세요.")
+        
+from EDA_N import eda_page_streamlit  # EDA_N.py 파일의 eda_page 함수 임포트
 
 def run():
     st.set_page_config(layout='wide')
 
-    # 사이드바 네비게이션 
+    # 사이드바 네비게이션
     sidebar_navigation()
 
-    if st.session_state.get("session", "Stock") == "stock_N":
+    if st.session_state.get("session", "stock_N") == "stock_N":
         stock.main()
-    elif st.session_state.get("session", "Stock") == "EDA_N":
-        eda_page()
+    elif st.session_state["session"] == "EDA_N":
+        eda_page_streamlit()  # EDA_N 파일의 eda_page 함수 호출
+
 
 if __name__ == "__main__":
-    run()    
+    run()     
