@@ -1,5 +1,6 @@
 import streamlit as st
 import EDA
+import reg
 import stock
 
 def sidebar_nagivation():
@@ -8,6 +9,8 @@ def sidebar_nagivation():
         st.session_state["session"]="EDA"
     if st.sidebar.button('Stock'):
         st.session_state["session"]="Stock"
+    if st.sidebar.button('Regression'):
+        st.session_state["session"]="Regression"
         
     
     st.sidebar.title('Options')
@@ -20,8 +23,10 @@ def run():
     
     if st.session_state.get("session","Stock") == "Stock":
         stock.main()
-    if st.session_state.get("session","Stock") == "EDA":
+    elif st.session_state["session"] == "EDA":
         EDA.main()
+    elif st.session_state["session"] == "Regression":
+        reg.main()
     
 if __name__ == "__main__":
     run()
