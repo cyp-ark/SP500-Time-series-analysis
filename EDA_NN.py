@@ -71,6 +71,51 @@ def perform_normality_test(data):
     return results
 
 
+def interpret_decomposition_with_ai(signal, trend, seasonal, residual, model, col, stock):
+    """
+    시계열 분해 결과를 LangChain API를 통해 AI에게 전달하여 해석을 받는 함수
+    """
+    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.5)
+
+    # LangChain Prompt Template 정의
+    prompt = PromptTemplate(
+        input_variables=["signal", "trend", "seasonal", "residual", "model", "col", "stock"],
+        template="""
+        다음은 특정 주식 데이터의 시계열 분해 결과입니다:
+
+        - 원본 신호 데이터(signal): {signal}
+        - 추세(trend): {trend}
+        - 계절성(seasonal): {seasonal}
+        - 잔차(residual): {residual}
+
+        분해 모델: {model}
+        분석 대상 컬럼: {col}
+        주식 코드: {stock}
+
+        위 데이터를 기반으로 다음 질문에 답변해주세요:
+        1. 추세 데이터(trend)에서 나타나는 주요 패턴은 무엇인가요?
+        2. 계절성 데이터(seasonal)는 어떤 주기를 가지고 있나요?
+        3. 잔차(residual) 데이터를 통해 알 수 있는 신호의 노이즈 특성은 무엇인가요?
+        4. 전체적으로 데이터의 주요 특징을 요약해주세요.
+        """
+    )
+
+    # LangChain Chain 설정
+    chain = LLMChain(llm=llm, prompt=prompt)
+
+    # LangChain 호출하여 해석 받기
+    interpretation = chain.run({
+        "signal": signal.to_json(),  # JSON 형식으로 변환하여 전달
+        "trend": trend.to_json(),
+        "seasonal": seasonal.to_json(),
+        "residual": residual.to_json(),
+        "model": model,
+        "col": col,
+        "stock": stock
+    })
+
+    return interpretation
+
 def show_combined_histogram_with_tests(data):
     # 기본 데이터와 로그 데이터 분리
     name_columns = [col for col in data.columns if not col.startswith('log_') and col != 'Date']
@@ -307,7 +352,7 @@ def show_decomposition(data, col, log, model):
     return fig, data[col], trend, seasonal, residual
 
 
-def visualize_smoothing(data):
+def visualize_smoothing(data): 
     """
     단순 이동평균, 가중 이동평균, 지수평활화를 시각화하며,
     단순 이동평균의 Window Size 및 Centered 옵션 조합에 따른 Loss Function 값을 계산 및 시각화.
@@ -321,7 +366,7 @@ def visualize_smoothing(data):
 
     # **1. 변수 선택**
     original_columns = [col for col in data.columns[1:] if not col.startswith('log_')]
-    col1, col2, col3 = st.columns([2, 1, 1])
+    col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
 
     with col1:
         column = st.selectbox("Select a variable for smoothing", original_columns)
@@ -331,6 +376,9 @@ def visualize_smoothing(data):
         transform_option = st.selectbox(
             "Select Data Transformation", ["original data", "1st differencing", "2nd differencing"], index=0
         )
+    with col4:
+        # Loss Function 선택
+        loss_function = st.selectbox("Select Loss Function", ["RMSE", "MSE", "MAE", "MAPE", "R2"], index=0)
 
     # 데이터 선택 및 변환 적용
     selected_column = column
@@ -362,13 +410,6 @@ def visualize_smoothing(data):
     # **2. 단순 이동평균 파라미터 선택 및 Loss Function 계산 통합**
     st.markdown("<h3 style='font-size:20px; color:black;'>Moving Average Parameters</h3>", unsafe_allow_html=True)
 
-    # Loss Function 선택
-    col4, col5 = st.columns(2)
-    with col4:
-        loss_function = st.selectbox("Select Loss Function", ["RMSE", "MSE", "MAE", "MAPE", "R2"], index=0)
-    with col5:
-        centered_options = st.multiselect("Select Centered Options", options=[True, False], default=[True, False])
-
     # Window Size 범위 설정
     col6, col7 = st.columns(2)
     with col6:
@@ -378,36 +419,38 @@ def visualize_smoothing(data):
 
     # Loss 계산 (Train 데이터 기준)
     results = []
-    for centered in centered_options:
-        for window_size in range(min_window, max_window + 1):
-            moving_avg = train_data.rolling(window=window_size, center=centered).mean()
-            valid_indices = ~moving_avg.isna()
+    # for centered in centered_options:
+    for window_size in range(min_window, max_window + 1):
+        moving_avg = train_data.rolling(window=window_size).mean()
+        valid_indices = ~moving_avg.isna()
 
-            if valid_indices.sum() == 0:  # 유효 데이터가 없으면 건너뛰기
-                continue
+        if valid_indices.sum() == 0:  # 유효 데이터가 없으면 건너뛰기
+            continue
 
-            actual = train_data[valid_indices]
-            predicted = moving_avg[valid_indices]
+        actual = train_data[valid_indices]
+        predicted = moving_avg[valid_indices]
 
-            if loss_function == "RMSE":
-                loss = np.sqrt(mean_squared_error(actual, predicted))
-            elif loss_function == "MSE":
-                loss = mean_squared_error(actual, predicted)
-            elif loss_function == "MAE":
-                loss = mean_absolute_error(actual, predicted)
-            elif loss_function == "MAPE":
-                loss = mean_absolute_percentage_error(actual, predicted)
-            elif loss_function == "R2":
-                loss = r2_score(actual, predicted)  
+        if loss_function == "RMSE":
+            loss = np.sqrt(mean_squared_error(actual, predicted))
+        elif loss_function == "MSE":
+            loss = mean_squared_error(actual, predicted)
+        elif loss_function == "MAE":
+            loss = mean_absolute_error(actual, predicted)
+        elif loss_function == "MAPE":
+            loss = mean_absolute_percentage_error(actual, predicted)
+        elif loss_function == "R2":
+            loss = r2_score(actual, predicted)  
 
-            results.append({
-                "Window Size": window_size,
-                "Centered": centered,
-                "Loss": loss
-            })
+        results.append({
+            "Window Size": window_size, 
+            "Loss": loss
+        })
 
-    # 결과 정렬 및 최적 파라미터 선택
-    results_df = pd.DataFrame(results).sort_values(by="Loss", ascending=True)
+    # 결정계수면 역으로 결과 정렬 및 최적 파라미터 선택
+    if loss_function == 'R2':
+        results_df = pd.DataFrame(results).sort_values(by="Loss", ascending=False)
+    else:
+        results_df = pd.DataFrame(results).sort_values(by="Loss", ascending=True)
 
     # Train 데이터 Loss 그래프와 데이터프레임 나란히 배치 (3:7 비율)
     col_loss_table, col_loss_chart = st.columns([3, 7])
@@ -420,18 +463,16 @@ def visualize_smoothing(data):
             results_df,
             x="Window Size",
             y="Loss",
-            color="Centered",
-            title=f"{loss_function} by Window Size and Centered Option (Train Data)",
+            title=f"{loss_function} by Window Size Option (Train Data)",
             labels={"Window Size": "Window Size", "Loss": f"{loss_function}"},
         )
         st.plotly_chart(fig_loss, use_container_width=True)
 
-    # 최적 파라미터 적용하여 Test 데이터 예측
+    # 최적 파라미터 적용하여 Test 데이터 예측       
     best_params = results_df.iloc[0]
     best_window = int(best_params["Window Size"])
-    best_centered = best_params["Centered"]
 
-    test_moving_avg = test_data.rolling(window=best_window, center=best_centered).mean()
+    test_moving_avg = test_data.rolling(window=best_window).mean()
 
     # Test 데이터 Loss 계산
     valid_test_indices = ~test_moving_avg.isna()
@@ -450,8 +491,9 @@ def visualize_smoothing(data):
         elif loss_function == "R2":
             test_loss = r2_score(actual, predicted)
 
-        st.write(f"Best Parameters: Window Size={best_window}, Centered={best_centered}")
+        st.write(f"Best Parameters: Window Size={best_window}")
         st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+
 
     # **6. 가중 이동평균 (Weighted Moving Average) 파라미터 선택 및 Loss Function 계산**
     st.markdown("<h3 style='font-size:20px; color:black;'>Weighted Moving Average Parameters</h3>", unsafe_allow_html=True)
@@ -496,12 +538,18 @@ def visualize_smoothing(data):
                 loss = mean_absolute_error(actual, predicted)
             elif loss_function == "MAPE":
                 loss = mean_absolute_percentage_error(actual, predicted)
+            elif loss_function == "R2":
+                loss = r2_score(actual, predicted)  
 
             wma_results.append({"Window Size": window_size, "Weight Type": weight_type, "Loss": loss})
+    
+    # 결정계수면 역으로
+    if loss_function == 'R2':
+        wma_results_df = pd.DataFrame(wma_results).sort_values(by="Loss", ascending=False)
+    else:
+        wma_results_df = pd.DataFrame(wma_results).sort_values(by="Loss", ascending=True)
 
-    wma_results_df = pd.DataFrame(wma_results).sort_values(by="Loss", ascending=True)
-
-    # 최적 파라미터 추출
+    # 최적 파라미터 추출 
     best_params2 = wma_results_df.iloc[0]
     best_wma_weights = int(best_params2["Window Size"])
     best_wma_type = best_params2["Weight Type"]
@@ -522,6 +570,51 @@ def visualize_smoothing(data):
             labels={"Window Size": "Window Size", "Loss": f"{loss_function}"},
         )
         st.plotly_chart(fig_wma, use_container_width=True)
+        
+    # 최적 파라미터 적용하여 Test 데이터 예측
+    best_wma_weights = int(best_params2["Window Size"])
+    best_wma_type = best_params2["Weight Type"]
+
+    # 최적 가중치 생성
+    if best_wma_type == "Linear":
+        weights = np.arange(1, best_wma_weights + 1).astype(float)
+    elif best_wma_type == "Reverse":
+        weights = np.arange(best_wma_weights, 0, -1).astype(float)
+    elif best_wma_type == "Exponential":
+        k = 0.5  # 감쇠 계수
+        weights = np.exp(-k * (best_wma_weights - np.arange(1, best_wma_weights + 1))).astype(float)
+    elif best_wma_type == "Triangular":
+        weights = 1 - np.abs(np.linspace(-1, 1, best_wma_weights))
+    weights /= weights.sum()  # 가중치 정규화
+
+    # Test 데이터에 가중 이동평균 적용
+    test_weighted_moving_avg = test_data.rolling(window=best_wma_weights).apply(
+        lambda x: np.dot(x, weights), raw=True
+    )
+
+    # Test 데이터 손실 계산
+    valid_test_indices = ~test_weighted_moving_avg.isna()
+    if valid_test_indices.sum() > 0:
+        test_actual = test_data[valid_test_indices]
+        test_predicted = test_weighted_moving_avg[valid_test_indices]
+
+        # Loss 계산
+        if loss_function == "RMSE":
+            test_loss = np.sqrt(mean_squared_error(test_actual, test_predicted))
+        elif loss_function == "MSE":
+            test_loss = mean_squared_error(test_actual, test_predicted)
+        elif loss_function == "MAE":
+            test_loss = mean_absolute_error(test_actual, test_predicted)
+        elif loss_function == "MAPE":
+            test_loss = mean_absolute_percentage_error(test_actual, test_predicted)
+        elif loss_function == "R2":
+            test_loss = r2_score(test_actual, test_predicted)
+
+        # 결과 출력
+        st.write(f"Best Parameters: Window Size={best_wma_weights}")
+        st.write(f"Best Parameters: Weight Type={best_wma_type}")
+        st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+
 
     # **7. 지수평활 (Exponential Smoothing) 파라미터 선택 및 Loss Function 계산**
     st.markdown("<h3 style='font-size:20px; color:black;'>Exponential Smoothing Parameters</h3>", unsafe_allow_html=True)
@@ -537,6 +630,7 @@ def visualize_smoothing(data):
     es_results = []
     alpha_values = np.arange(min_alpha, max_alpha + alpha_step, alpha_step)
 
+    # 모델 학습
     for alpha in alpha_values:
         train_es = train_data.ewm(alpha=alpha, adjust=False).mean()
         valid_indices = ~train_es.isna()
@@ -555,11 +649,18 @@ def visualize_smoothing(data):
             loss = mean_absolute_error(actual, predicted)
         elif loss_function == "MAPE":
             loss = mean_absolute_percentage_error(actual, predicted)
-
+        elif loss_function == "R2":
+            loss = r2_score(actual, predicted)  
         es_results.append({"Alpha": alpha, "Loss": loss})
 
-    es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=True)
-    es_results_df["Alpha"] = es_results_df["Alpha"].round(2)
+    # 결정계수면 역으로
+    if loss_function == 'R2':
+        es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=False)
+    else:
+        es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=True)
+        
+    # es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=True)
+    es_results_df["Alpha"] = es_results_df["Alpha"].round(2) 
 
     # Train 데이터 Loss 그래프와 데이터프레임 나란히 배치 (3:7 비율)
     col_es_table, col_es_chart = st.columns([3, 7])
@@ -574,8 +675,32 @@ def visualize_smoothing(data):
             y="Loss",
             title="Exponential Smoothing Loss by Alpha",
             labels={"Alpha": "Alpha", "Loss": f"{loss_function}"},
-        )
-        st.plotly_chart(fig_es, use_container_width=True)
+        ) 
+        st.plotly_chart(fig_es, use_container_width=True) 
+        
+    # Test 데이터에 ES 적용 및 손실 계산
+    best_alpha = es_results_df.iloc[0]['Alpha']  # 최적 Alpha 값 추출
+    test_es = test_data.ewm(alpha=best_alpha, adjust=False).mean()  # 최적 Alpha를 이용해 지수평활법 적용
+    valid_test_es_indices = ~test_es.isna()  # 유효 데이터 확인
+
+    if valid_test_es_indices.sum() > 0:
+        test_actual_es = test_data[valid_test_es_indices]
+        test_predicted_es = test_es[valid_test_es_indices]
+
+        if loss_function == "RMSE":
+            test_es_loss = np.sqrt(mean_squared_error(test_actual_es, test_predicted_es))
+        elif loss_function == "MSE":
+            test_es_loss = mean_squared_error(test_actual_es, test_predicted_es)
+        elif loss_function == "MAE":
+            test_es_loss = mean_absolute_error(test_actual_es, test_predicted_es)
+        elif loss_function == "MAPE":
+            test_es_loss = mean_absolute_percentage_error(test_actual_es, test_predicted_es)
+        elif loss_function == "R2":
+            test_es_loss = r2_score(test_actual_es, test_predicted_es)
+
+        st.write(f"Best Parameters for ES: Alpha={best_alpha}")
+        st.write(f"Test Loss for ES ({loss_function}): {test_es_loss:.4f}")
+
 
     # 8. 최적 파라미터 조합 시각화
     st.markdown("<h3 style='font-size:20px; color:black;'>Best Parameter Smoothing Method</h3>", unsafe_allow_html=True)
@@ -583,19 +708,19 @@ def visualize_smoothing(data):
     # 기존 기능 시각화
     fig = go.Figure()
 
-    # 원 데이터 시각화
+    # 원 데이터 시각화 
     fig.add_trace(
         go.Scatter(x=dates, y=original_data, mode='lines', name='Original', line=dict(color='blue'))
     )
 
     # 단순 이동평균 최적 파라미터 적용 시각화
-    best_moving_avg = train_data.rolling(window=best_window, center=best_centered).mean()
+    best_moving_avg = train_data.rolling(window=best_window).mean()
     fig.add_trace(
         go.Scatter(
             x=dates[:len(best_moving_avg)],
             y=best_moving_avg,
             mode='lines',
-            name=f'MA (Window={best_window}, Centered={best_centered})',
+            name=f'MA (Window={best_window})',
             line=dict(color='orange')
         )
     )
@@ -643,13 +768,13 @@ def visualize_smoothing(data):
 
     # Test 데이터 최적 파라미터 적용 시각화
     # 단순 이동평균
-    best_test_moving_avg = test_data.rolling(window=best_window, center=best_centered).mean()
+    best_test_moving_avg = test_data.rolling(window=best_window).mean()
     fig.add_trace(
         go.Scatter(
             x=dates[len(train_data):len(train_data)+len(best_test_moving_avg)],
             y=best_test_moving_avg,
             mode='lines',
-            name=f'MA Test (Window={best_window}, Centered={best_centered})',
+            name=f'MA Test (Window={best_window})',
             line=dict(color='orange', dash='dot')
         )
     )
@@ -671,7 +796,7 @@ def visualize_smoothing(data):
     fig.add_trace(
         go.Scatter(
             x=dates[len(train_data):len(train_data)+len(best_test_es)],
-            y=best_test_es,
+            y=best_test_es, 
             mode='lines',
             name=f'ES Test (Alpha={best_alpha})',
             line=dict(color='red', dash='dot')
@@ -680,8 +805,6 @@ def visualize_smoothing(data):
 
     # 그래프 출력
     st.plotly_chart(fig, use_container_width=True)
-
-
     
     
 def plot_acf_pacf(data, title):
@@ -695,7 +818,7 @@ def plot_acf_pacf(data, title):
     axes[1].set_title("PACF")
     
     st.pyplot(fig)
-
+ 
 
 def perform_adf_test(data, title):
     """ADF 검정 수행"""
@@ -710,83 +833,6 @@ def perform_adf_test(data, title):
         st.write("Result: 데이터가 Stationary 상태입니다 (p-value <= 0.05).")
     else: 
         st.write("Result: 데이터가 Non-Stationary 상태입니다 (p-value > 0.05).")
-
-
-'''
-def stationary_test(data, col):
-    """Stationary Test: ACF, ADF, KPSS 수행 with Selectbox, Results Table, and Hypothesis"""
-    # st.markdown("<h3 style='font-size:24px; color:blue;'>Stationary Test</h3>", unsafe_allow_html=True)
-
-    # 데이터 상태 선택
-    option = st.selectbox(
-        "Select Data Transformation:",
-        ["Original Data", "1st Differencing", "2nd Differencing"]
-    )
-
-    # 데이터 변환
-    if option == "Original Data":
-        selected_data = data[col]
-        transformation = "Original Data"
-    elif option == "1st Differencing":
-        selected_data = data[col].diff().dropna()
-        transformation = "1st Differencing"
-    elif option == "2nd Differencing":
-        selected_data = data[col].diff().diff().dropna()
-        transformation = "2nd Differencing"
-
-    # ACF 및 PACF 그래프
-    st.markdown(f"### ACF and PACF - {transformation}")
-    fig, ax = plt.subplots(1, 2, figsize=(12, 4))
-    plot_acf(selected_data, ax=ax[0], lags=20, title=f"ACF - {transformation}")
-    plot_pacf(selected_data, ax=ax[1], lags=20, title=f"PACF - {transformation}")
-    st.pyplot(fig)
-
-    # ADF Test
-    st.markdown(f"### ADF Test Results - {transformation}")
-    st.markdown("**Hypotheses:**") 
-    st.markdown("- **H0**: 데이터는 Non-Stationary Data이다 (단위근이 존재한다).")
-    st.markdown("- **H1**: 데이터는 Stationary Data이다. (단위근이 없다).")
-    result_adf = adfuller(selected_data)
-    adf_table = {
-        "Statistic": [result_adf[0]],
-        "p-value": [result_adf[1]],
-        "Critical Value (1%)": [result_adf[4]["1%"]],
-        "Critical Value (5%)": [result_adf[4]["5%"]],
-        "Critical Value (10%)": [result_adf[4]["10%"]]
-    }
-    adf_df = pd.DataFrame(adf_table)
-    st.table(adf_df)
-
-    adf_result_text = (
-        "Result: Stationary (p-value <= 0.05)" if result_adf[1] <= 0.05 
-        else "Result: Non-Stationary (p-value > 0.05)"
-    )
-    st.markdown(f"<p style='color:green;'>{adf_result_text}</p>", unsafe_allow_html=True)
-
-    # KPSS Test
-    st.markdown(f"### KPSS Test Results - {transformation}")
-    st.markdown("**Hypotheses:**")
-    st.markdown("- **H0**: 데이터는 Stationary Data이다.")
-    st.markdown("- **H1**: 데이터는 Non-Stationary Data이다.")
-
-    result_kpss = kpss(selected_data, regression='c')
-    kpss_table = {
-        "Statistic": [result_kpss[0]],
-        "p-value": [result_kpss[1]],
-        "Critical Value (10%)": [result_kpss[3]["10%"]],
-        "Critical Value (5%)": [result_kpss[3]["5%"]],
-        "Critical Value (2.5%)": [result_kpss[3]["2.5%"]],
-        "Critical Value (1%)": [result_kpss[3]["1%"]]
-    }
-    kpss_df = pd.DataFrame(kpss_table)
-    st.table(kpss_df)
-
-    kpss_result_text = (
-        "Result: Stationary (p-value > 0.05)" if result_kpss[1] > 0.05 
-        else "Result: Non-Stationary (p-value <= 0.05)"
-    )
-    st.markdown(f"<p style='color:green;'>{kpss_result_text}</p>", unsafe_allow_html=True)
-'''
 
 
 def stationary_test(data, default_col):
@@ -992,7 +1038,7 @@ def main():
         col = st.selectbox('Column', filtered_data.columns[1:6], index=0)
 
     # 로그 스케일 옵션
-    with col2:
+    with col2: 
         log = st.selectbox('Log Scale', ['log', 'original'], index=0)
 
     # 가법/승법 모델 선택
