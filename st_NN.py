@@ -3,12 +3,11 @@ import EDA_NN
 import stock_NN
 
 def sidebar_nagivation():
+    st.sidebar.title('Options')
     st.session_state["session"]="EDA_NN"
     if st.sidebar.button('Stock'):
         st.session_state["session"]="Stock_NN"
         
-    st.sidebar.title('Options')
-
 def run():
     st.set_page_config(layout='wide') 
     
@@ -19,8 +18,8 @@ def run():
         stock_NN.main()
     if st.session_state.get("session","Stock") == "EDA_NN":
         st.title("EDA")
-        st.write("EDA is not implemented yet.")
+        # st.write("EDA is not implemented yet.")
         EDA_NN.main()
     
 if __name__ == "__main__":
-    run() 
+    run()
