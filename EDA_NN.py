@@ -19,6 +19,8 @@ from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 from statsmodels.tsa.stattools import adfuller
 import matplotlib.pyplot as plt
 from statsmodels.tsa.stattools import adfuller, kpss
+from statsmodels.tsa.arima.model import ARIMA
+from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
 
 
 def load_data(stock):
@@ -352,6 +354,7 @@ def show_decomposition(data, col, log, model):
     return fig, data[col], trend, seasonal, residual
 
 
+
 def visualize_smoothing(data): 
     """
     단순 이동평균, 가중 이동평균, 지수평활화를 시각화하며,
@@ -360,7 +363,7 @@ def visualize_smoothing(data):
     import numpy as np
     import pandas as pd
     import plotly.graph_objects as go
-    import plotly.express as px
+    import plotly.express as px 
     import streamlit as st
     from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
 
@@ -407,6 +410,8 @@ def visualize_smoothing(data):
     train_data = original_data[:train_size]
     test_data = original_data[train_size:]
 
+
+
     # **2. 단순 이동평균 파라미터 선택 및 Loss Function 계산 통합**
     st.markdown("<h3 style='font-size:20px; color:black;'>Moving Average Parameters</h3>", unsafe_allow_html=True)
 
@@ -419,6 +424,7 @@ def visualize_smoothing(data):
 
     # Loss 계산 (Train 데이터 기준)
     results = []
+    
     # for centered in centered_options:
     for window_size in range(min_window, max_window + 1):
         moving_avg = train_data.rolling(window=window_size).mean()
@@ -456,8 +462,15 @@ def visualize_smoothing(data):
     col_loss_table, col_loss_chart = st.columns([3, 7])
 
     with col_loss_table:
-        st.dataframe(results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        # st.dataframe(results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        st.dataframe(
+            results_df.style
+            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
+            .hide(axis='index'),  # 인덱스 숨기기
+            use_container_width=True
+        )
 
+        
     with col_loss_chart:
         fig_loss = px.line(
             results_df,
@@ -493,6 +506,7 @@ def visualize_smoothing(data):
 
         st.write(f"Best Parameters: Window Size={best_window}")
         st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+
 
 
     # **6. 가중 이동평균 (Weighted Moving Average) 파라미터 선택 및 Loss Function 계산**
@@ -558,7 +572,14 @@ def visualize_smoothing(data):
     col_wma_table, col_wma_chart = st.columns([3, 7])
 
     with col_wma_table:
-        st.dataframe(wma_results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        # st.dataframe(wma_results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        st.dataframe(
+            wma_results_df.style
+            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
+            .hide(axis='index'),  # 인덱스 숨기기
+            use_container_width=True
+        )
+        
 
     with col_wma_chart:
         fig_wma = px.line(
@@ -616,6 +637,7 @@ def visualize_smoothing(data):
         st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
 
 
+
     # **7. 지수평활 (Exponential Smoothing) 파라미터 선택 및 Loss Function 계산**
     st.markdown("<h3 style='font-size:20px; color:black;'>Exponential Smoothing Parameters</h3>", unsafe_allow_html=True)
 
@@ -666,7 +688,15 @@ def visualize_smoothing(data):
     col_es_table, col_es_chart = st.columns([3, 7])
 
     with col_es_table:
-        st.dataframe(es_results_df.style.apply(lambda x: ['color: green; font-weight: bold' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        # st.dataframe(es_results_df.style.apply(lambda x: ['color: green; font-weight: bold' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
+        st.dataframe(
+            es_results_df.style
+            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
+            .hide(axis='index'),  # 인덱스 숨기기
+            use_container_width=True
+        )
+        
+
         
     with col_es_chart:
         fig_es = px.line(
@@ -700,9 +730,147 @@ def visualize_smoothing(data):
 
         st.write(f"Best Parameters for ES: Alpha={best_alpha}")
         st.write(f"Test Loss for ES ({loss_function}): {test_es_loss:.4f}")
+    
+    import pandas as pd
+    import numpy as np 
+    import matplotlib.pyplot as plt
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
+    from statsmodels.tsa.arima.model import ARIMA
+    import plotly.graph_objects as go
+    import streamlit as st  
+
+    # **8. ARIMA **
+    st.markdown("<h3 style='font-size:20px; color:black;'>ARIMA Parameters (Rolling Update)</h3>", unsafe_allow_html=True)
+
+    # ARIMA 파라미터 범위 설정
+    col_p_range, col_q_range = st.columns(2)
+    with col_p_range:
+        max_p = st.number_input("Maximum AR term (p)", min_value=0, max_value=10, value=3, step=1)
+    with col_q_range:
+        max_q = st.number_input("Maximum MA term (q)", min_value=0, max_value=10, value=3, step=1)
+
+    # transform_option에 따른 d 값 설정
+    if 'transform_option' in locals() and transform_option == "original data":
+        d = 0
+    elif 'transform_option' in locals() and transform_option == "1st differencing":
+        d = 1
+    elif 'transform_option' in locals() and transform_option == "2nd differencing":
+        d = 2
+    else:
+        d = 1  # 기본적으로 1차 차분을 사용
+
+    # AIC 결과 저장을 위한 리스트
+    aic_results = []
+
+    # 학습 데이터로 ARIMA 모델 학습
+    with st.spinner("Training ARIMA model..."):
+        for p in range(max_p + 1):
+            for q in range(max_q + 1):
+                try:
+                    model = ARIMA(train_data, order=(p, d, q))
+                    fitted_model = model.fit()
+                    # 각 파라미터 조합에서 AIC 값을 수집
+                    aic_value = fitted_model.aic
+                    aic_results.append({"p": p, "q": q, "AIC": aic_value})
+                except Exception as e:
+                    aic_results.append({"p": p, "q": q, "AIC": np.nan})
+
+    # AIC 결과를 데이터프레임으로 정리
+    aic_results_df = pd.DataFrame(aic_results).sort_values(by="AIC", ascending=True)
+
+    # AIC 결과를 시각화 및 출력
+    col_aic_table, col_aic_chart = st.columns([3, 7])
+    with col_aic_table:
+        #st.dataframe(aic_results_df.style.highlight_min(subset=['AIC'], color="lightgreen", axis=0).hide(axis='index'), use_container_width=True)
+        st.dataframe(
+    aic_results_df.style
+    .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
+    .hide(axis='index'),  # 인덱스 숨기기
+    use_container_width=True
+)
 
 
-    # 8. 최적 파라미터 조합 시각화
+    with col_aic_chart:
+        fig_aic = go.Figure()
+        fig_aic.add_trace(go.Scatter(
+            x=aic_results_df.index, y=aic_results_df['AIC'], mode="lines+markers",
+            name="AIC Values", line=dict(color="purple")
+        ))
+        fig_aic.update_layout(title="AIC Values by ARIMA Parameters",
+                            xaxis_title="Parameter Combination Index",
+                            yaxis_title="AIC Value")
+        st.plotly_chart(fig_aic, use_container_width=True)
+
+    # 최적 파라미터 선택
+    best_params = aic_results_df.iloc[0]
+    
+    # 성능 평가   
+    st.write(f"Best Parameters of ARIMA: p={best_params['p']}, d = {d}, q={best_params['q']}")
+    
+    # 최적 파라미터로 모델 학습
+    model = ARIMA(train_data, order=(int(best_params['p']), d, int(best_params['q'])))
+    fitted_model = model.fit()
+
+    # one point forecast 함수 정의, 신뢰구간도 함께 담아보기
+    def forecast_one_step():
+        forecast = fitted_model.get_forecast(steps=1)
+        fc = forecast.predicted_mean.values[0]
+        conf = forecast.conf_int(alpha=0.05).values[0] 
+        return fc, conf
+
+    # 값들을 담을 빈 리스트 생성
+    y_pred = []
+    pred_upper = []
+    pred_lower = []
+
+    # 테스트 데이터를 순차적으로 처리하며 예측 및 업데이트
+    for i, new_ob in enumerate(test_data):
+        # 예측 수행
+        fc, conf = forecast_one_step()
+        y_pred.append(fc)  # 예측값 추가 
+        pred_upper.append(conf[1])  # 신뢰구간 상단
+        pred_lower.append(conf[0])  # 신뢰구간 하단
+
+        # 모델 업데이트
+        fitted_model = fitted_model.append([new_ob], refit=False)
+
+    # 예측 결과를 데이터프레임으로 정리
+    test_pred = pd.DataFrame({"Test": test_data, "Predicted": y_pred})
+    y_pred_series = test_pred["Predicted"]  # Series 형태로 변환
+
+    # 시각화 
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=dates[:train_size], y=train_data, mode="lines", name="Train Data", line=dict(color="blue")))
+    fig.add_trace(go.Scatter(x=dates[train_size:], y=test_data, mode="lines", name="Test Data", line=dict(color="orange")))
+    fig.add_trace(go.Scatter(x=dates[train_size:], y=y_pred, mode="lines", name="Predicted", line=dict(color="green")))
+
+    # 신뢰구간 시각화
+    fig.add_trace(go.Scatter(x=dates[train_size:], y=pred_upper, mode="lines", name="Prediction Upper", line=dict(color="lightgreen", dash="dot")))
+    fig.add_trace(go.Scatter(x=dates[train_size:], y=pred_lower, mode="lines", name="Prediction Lower", line=dict(color="lightgreen", dash="dot")))
+    
+    fig.update_layout(title="ARIMA prediction",)
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # 성능 평가
+    if loss_function == "RMSE":
+        test_loss = np.sqrt(mean_squared_error(test_data, y_pred))
+    elif loss_function == "MSE":
+        test_loss = mean_squared_error(test_data, y_pred)
+    elif loss_function == "MAE":
+        test_loss = mean_absolute_error(test_data, y_pred)
+    elif loss_function == "MAPE":
+        test_loss = mean_absolute_percentage_error(test_data, y_pred)
+    elif loss_function == "R2":
+        test_loss = r2_score(test_data, y_pred)
+        
+    # st.write(f"Best Parameters of ARIMA: p={best_params['p']}, d = {d}, q={best_params['q']}, Test Loss {loss_function}: {test_loss:.4f}")
+    st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+    # st.markdown(f"<h4>Test Loss ({loss_function}): {test_loss:.4f}</h4>", unsafe_allow_html=True)
+
+
+
+    # 9. 최적 파라미터 조합 시각화
     st.markdown("<h3 style='font-size:20px; color:black;'>Best Parameter Smoothing Method</h3>", unsafe_allow_html=True)
 
     # 기존 기능 시각화
@@ -712,8 +880,8 @@ def visualize_smoothing(data):
     fig.add_trace(
         go.Scatter(x=dates, y=original_data, mode='lines', name='Original', line=dict(color='blue'))
     )
-
-    # 단순 이동평균 최적 파라미터 적용 시각화
+ 
+    # (1) 단순 이동평균 최적 파라미터 적용 시각화
     best_moving_avg = train_data.rolling(window=best_window).mean()
     fig.add_trace(
         go.Scatter(
@@ -725,7 +893,7 @@ def visualize_smoothing(data):
         )
     )
 
-    # 가중 이동평균 최적 파라미터 적용 시각화
+    # (2) 가중 이동평균 최적 파라미터 적용 시각화
     best_wma_type = wma_results_df.iloc[0]['Weight Type']
     best_wma_window = int(wma_results_df.iloc[0]['Window Size'])
 
@@ -753,7 +921,7 @@ def visualize_smoothing(data):
         )
     )
 
-    # 지수평활 최적 파라미터 적용 시각화
+    # (3) 지수평활 최적 파라미터 적용 시각화
     best_alpha = es_results_df.iloc[0]['Alpha']
     best_es = train_data.ewm(alpha=best_alpha, adjust=False).mean()
     fig.add_trace(
@@ -765,9 +933,24 @@ def visualize_smoothing(data):
             line=dict(color='red')
         )
     )
+    
+    # (4) ARIMA 모델의 학습 데이터 적합값
+    arima_fitted_values = fitted_model.fittedvalues
+ 
+    # 학습 데이터 적합값 시각화
+    fig.add_trace(
+        go.Scatter(
+            x=dates[:len(arima_fitted_values)],
+            y=arima_fitted_values,
+            mode='lines',
+            name=f'ARIMA Fit (p={best_params["p"]}, d={d}, q={best_params["q"]})',
+            line=dict(color='purple')
+        )  
+    )
+
 
     # Test 데이터 최적 파라미터 적용 시각화
-    # 단순 이동평균
+    # (1) 단순 이동평균   
     best_test_moving_avg = test_data.rolling(window=best_window).mean()
     fig.add_trace(
         go.Scatter(
@@ -779,7 +962,7 @@ def visualize_smoothing(data):
         )
     )
 
-    # 가중 이동평균
+    # (2) 가중 이동평균
     best_test_wma = test_data.rolling(window=best_wma_window).apply(lambda x: np.dot(x, weights), raw=True)
     fig.add_trace(
         go.Scatter(
@@ -791,7 +974,7 @@ def visualize_smoothing(data):
         )
     )
 
-    # 지수평활
+    # (3) 지수평활 
     best_test_es = test_data.ewm(alpha=best_alpha, adjust=False).mean()
     fig.add_trace(
         go.Scatter(
@@ -803,8 +986,19 @@ def visualize_smoothing(data):
         )
     ) 
 
+    # (4) ARIMA 모델 예측값 (테스트 데이터) 
+    fig.add_trace(
+        go.Scatter(
+            x=dates[len(train_data):len(train_data) + len(y_pred)],
+            y=y_pred,
+            mode='lines',
+            name=f'ARIMA Forecast (p={best_params["p"]}, d={d}, q={best_params["q"]})',
+            line=dict(color='purple', dash='dash')
+        )
+    )
     # 그래프 출력
     st.plotly_chart(fig, use_container_width=True)
+    
     
     
 def plot_acf_pacf(data, title):
@@ -819,6 +1013,7 @@ def plot_acf_pacf(data, title):
     
     st.pyplot(fig)
  
+
 
 def perform_adf_test(data, title):
     """ADF 검정 수행"""
@@ -835,19 +1030,37 @@ def perform_adf_test(data, title):
         st.write("Result: 데이터가 Non-Stationary 상태입니다 (p-value > 0.05).")
 
 
+
 def stationary_test(data, default_col):
     """Stationary Test: ACF, ADF, KPSS 수행 with Selectbox, Results Table, and Hypothesis"""
 
     import numpy as np
     import pandas as pd
-    import streamlit as st
+    import streamlit as st 
     from statsmodels.tsa.stattools import adfuller, kpss
     from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
     import matplotlib.pyplot as plt
 
-    # **1. 변수 선택, 로그 변환, 차분 옵션 설정**
-    col1, col2, col3 = st.columns(3)
+    # Rolling mean and std visualization function
+    def plot_rolling(data, roll_size):
+        # 이동평균함수(rolling) - 평균, 표준편차
+        roll_mean = data.rolling(window=roll_size).mean()
+        roll_std = data.rolling(window=roll_size).std()
 
+        # 시각화
+        plt.figure(figsize=(11, 5))
+        plt.plot(data, color='blue', alpha=0.25, label='Original')
+        plt.plot(roll_mean, color='black', label='Rolling mean')
+        plt.plot(roll_std, color='red', label='Rolling std')
+        plt.title('Rolling Mean & Standard Deviation') 
+        plt.ylabel("Values")
+        plt.legend()
+        st.pyplot(plt)
+
+   
+    # **1. 변수 선택, 로그 변환, 차분 옵션 설정**
+    col1, col2, col3, col4 = st.columns(4)
+    
     # 변수 선택
     with col1:
         col = st.selectbox("Select a variable for stationary test:", data.columns[1:6], index=data.columns.tolist().index(default_col))
@@ -860,6 +1073,9 @@ def stationary_test(data, default_col):
             "Select Data Transformation:",
             ["Original Data", "1st Differencing", "2nd Differencing"]
         )
+    # Rolling Window Size
+    with col4:
+        roll_size = st.number_input("Rolling Window Size:", min_value=1, max_value=100, value=5, step=1)
 
     # **2. 데이터 변환**
     # 로그 변환
@@ -879,14 +1095,19 @@ def stationary_test(data, default_col):
         selected_data = data[col].diff().diff().dropna()
         transformation = "2nd Differencing"
 
-    # **3. ACF 및 PACF 그래프**
+    # **3. Rolling Mean & Std 시각화**
+    st.markdown(f"### Rolling Mean & Standard Deviation - {transformation}")
+    plot_rolling(selected_data, roll_size)
+
+    
+    # **4. ACF 및 PACF 그래프**
     st.markdown(f"### ACF and PACF - {transformation}")
     fig, ax = plt.subplots(1, 2, figsize=(12, 4))
     plot_acf(selected_data, ax=ax[0], lags=20, title=f"ACF - {transformation}")
     plot_pacf(selected_data, ax=ax[1], lags=20, title=f"PACF - {transformation}")
     st.pyplot(fig)
-
-    # **4. ADF Test**
+ 
+    # **5. ADF Test**
     st.markdown(f"### ADF Test Results - {transformation}")
     st.markdown("**Hypotheses:**") 
     st.markdown("- **H0**: 데이터는 Non-Stationary Data이다 (단위근이 존재한다).")
@@ -908,7 +1129,7 @@ def stationary_test(data, default_col):
     )
     st.markdown(f"<p style='color:green;'>{adf_result_text}</p>", unsafe_allow_html=True)
 
-    # **5. KPSS Test**
+    # **6. KPSS Test**
     st.markdown(f"### KPSS Test Results - {transformation}")
     st.markdown("**Hypotheses:**")
     st.markdown("- **H0**: 데이터는 Stationary Data이다.")
@@ -1059,11 +1280,9 @@ def main():
 
 if __name__ == "__main__": 
     main() 
-    
-    
-    
 
     
     
     
+     
      
