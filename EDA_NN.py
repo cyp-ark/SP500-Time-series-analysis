@@ -367,6 +367,11 @@ def visualize_smoothing(data):
     import streamlit as st
     from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
 
+    # Adjusted R² 계산 함수 추가
+    def adjusted_r2_score(actual, predicted, n, k):
+        r2 = r2_score(actual, predicted)
+        return 1 - (1 - r2) * ((n - 1) / (n - k - 1))
+
     # **1. 변수 선택**
     original_columns = [col for col in data.columns[1:] if not col.startswith('log_')]
     col1, col2, col3, col4 = st.columns([1, 1, 1, 1])
@@ -410,9 +415,8 @@ def visualize_smoothing(data):
     train_data = original_data[:train_size]
     test_data = original_data[train_size:]
 
-
-
     # **2. 단순 이동평균 파라미터 선택 및 Loss Function 계산 통합**
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode 
     st.markdown("<h3 style='font-size:20px; color:black;'>Moving Average Parameters</h3>", unsafe_allow_html=True)
 
     # Window Size 범위 설정
@@ -424,10 +428,9 @@ def visualize_smoothing(data):
 
     # Loss 계산 (Train 데이터 기준)
     results = []
-    
-    # for centered in centered_options:
+
     for window_size in range(min_window, max_window + 1):
-        moving_avg = train_data.rolling(window=window_size).mean()
+        moving_avg = train_data.rolling(window=window_size).mean().shift(-1)
         valid_indices = ~moving_avg.isna()
 
         if valid_indices.sum() == 0:  # 유효 데이터가 없으면 건너뛰기
@@ -458,60 +461,103 @@ def visualize_smoothing(data):
     else:
         results_df = pd.DataFrame(results).sort_values(by="Loss", ascending=True)
 
-    # Train 데이터 Loss 그래프와 데이터프레임 나란히 배치 (3:7 비율)
-    col_loss_table, col_loss_chart = st.columns([3, 7])
-
-    with col_loss_table:
-        # st.dataframe(results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
-        st.dataframe(
-            results_df.style
-            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
-            .hide(axis='index'),  # 인덱스 숨기기
-            use_container_width=True
-        )
-
-        
-    with col_loss_chart:
-        fig_loss = px.line(
-            results_df,
-            x="Window Size",
-            y="Loss",
-            title=f"{loss_function} by Window Size Option (Train Data)",
-            labels={"Window Size": "Window Size", "Loss": f"{loss_function}"},
-        )
-        st.plotly_chart(fig_loss, use_container_width=True)
 
     # 최적 파라미터 적용하여 Test 데이터 예측       
     best_params = results_df.iloc[0]
     best_window = int(best_params["Window Size"])
+    
+    # **Ag-Grid 설정 및 UI 배치**  
+    col_loss_table, col_loss_chart = st.columns([3, 7])
 
-    test_moving_avg = test_data.rolling(window=best_window).mean()
+    with col_loss_table:
+        gb = GridOptionsBuilder.from_dataframe(results_df)
+        gb.configure_selection('multiple', use_checkbox=True) # , pre_selected_rows=list(range(5))
 
-    # Test 데이터 Loss 계산
-    valid_test_indices = ~test_moving_avg.isna()
-    if valid_test_indices.sum() > 0:
-        test_actual = test_data[valid_test_indices]
-        test_predicted = test_moving_avg[valid_test_indices]
+        # **첫 행 강조 (lightgreen 배경색 설정)**
+        custom_css = {
+            ".ag-row:first-child": {
+                "background-color": "lightgreen !important;"
+            }
+        }
 
-        if loss_function == "RMSE":
-            test_loss = np.sqrt(mean_squared_error(test_actual, test_predicted))
-        elif loss_function == "MSE":
-            test_loss = mean_squared_error(test_actual, test_predicted)
-        elif loss_function == "MAE":
-            test_loss = mean_absolute_error(test_actual, test_predicted)
-        elif loss_function == "MAPE":
-            test_loss = mean_absolute_percentage_error(test_actual, test_predicted)
-        elif loss_function == "R2":
-            test_loss = r2_score(actual, predicted)
+        # **열 크기 자동화**
+        gb.configure_default_column(resizable=True, autoSize=True)
+        gb.configure_grid_options(domLayout='normal')  # 스크롤 가능하도록 설정
+        grid_options = gb.build()
 
-        st.write(f"Best Parameters: Window Size={best_window}")
-        st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+        # Ag-Grid 초기 선택 설정
+        initial_selection = results_df.head(5).to_dict('records')
+        grid_response = AgGrid(
+            results_df,
+            gridOptions=grid_options,
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            allow_unsafe_jscode=True,
+            theme='streamlit',
+            custom_css=custom_css,
+            selected_rows=initial_selection
+        )
+
+        # 선택된 데이터 가져오기
+        selected_rows = grid_response['selected_rows']
+        selected_results = pd.DataFrame(selected_rows)
+
+    # **상위 5개 행 디폴트 시각화 및 선택된 조합의 이동평균 계산**
+    with col_loss_chart:
+        fig = go.Figure()
+
+        # 상위 5개 행 기본 시각화 (점선)
+        visualized_windows = set()
+        
+        for _, row in results_df.head(5).iterrows():
+            window_size = int(row['Window Size'])
+            visualized_windows.add(window_size)
+            test_moving_avg = test_data.rolling(window=window_size).mean()
+
+            fig.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=test_moving_avg,
+                mode="lines+markers",
+                name=f"Window Size: {window_size}",
+                line=dict(dash="dot")
+            ))
+
+        # 선택된 데이터 추가 시각화 (실선)
+        for _, row in selected_results.iterrows():
+            window_size = int(row['Window Size'])
+            if window_size not in visualized_windows:
+                test_moving_avg = test_data.rolling(window=window_size).mean()
+
+                fig.add_trace(go.Scatter(
+                    x=dates[train_size:],
+                    y=test_moving_avg,
+                    mode="lines+markers",
+                    name=f"Window Size: {window_size}",
+                    line=dict(dash="dot")
+                ))
+
+        # 테스트 데이터 추가 (검정색 실선)
+        fig.add_trace(go.Scatter(
+            x=dates[train_size:],
+            y=test_data,
+            mode="lines",
+            name="Test Data",
+            line=dict(color="black", dash="solid")
+        ))
+
+        # 그래프 설정 및 출력
+        fig.update_layout(title="Test Predictions for Selected Moving Averages",
+                        xaxis_title="Date", yaxis_title="Value")
+        st.plotly_chart(fig, use_container_width=True)
 
 
 
+    
+    
     # **6. 가중 이동평균 (Weighted Moving Average) 파라미터 선택 및 Loss Function 계산**
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+
     st.markdown("<h3 style='font-size:20px; color:black;'>Weighted Moving Average Parameters</h3>", unsafe_allow_html=True)
-    col8, col9 = st.columns(2)
+    col8, col9 = st.columns(2) 
 
     with col8:
         min_wma_window = st.number_input("Minimum Window Size for WMA", min_value=1, max_value=500, value=2, step=1)
@@ -523,6 +569,7 @@ def visualize_smoothing(data):
     wma_results = []
     for weight_type in weight_methods:
         for window_size in range(min_wma_window, max_wma_window + 1):
+            # 가중치 계산
             if weight_type == "Linear":
                 weights = np.arange(1, window_size + 1).astype(float)
             elif weight_type == "Reverse":
@@ -533,9 +580,13 @@ def visualize_smoothing(data):
             elif weight_type == "Triangular":
                 weights = 1 - np.abs(np.linspace(-1, 1, window_size))
 
-            weights /= weights.sum()
+            weights /= weights.sum()  # 가중치 정규화
 
-            train_wma = train_data.rolling(window=window_size).apply(lambda x: np.dot(x, weights), raw=True)
+            # WMA 계산
+            train_wma = train_data.rolling(window=window_size).apply(
+                lambda x: np.dot(x, weights[:len(x)]), raw=True
+            ).shift(-1)
+
             valid_indices = ~train_wma.isna()
 
             if valid_indices.sum() == 0:
@@ -556,87 +607,143 @@ def visualize_smoothing(data):
                 loss = r2_score(actual, predicted)  
 
             wma_results.append({"Window Size": window_size, "Weight Type": weight_type, "Loss": loss})
-    
+
     # 결정계수면 역으로
     if loss_function == 'R2':
         wma_results_df = pd.DataFrame(wma_results).sort_values(by="Loss", ascending=False)
     else:
         wma_results_df = pd.DataFrame(wma_results).sort_values(by="Loss", ascending=True)
 
-    # 최적 파라미터 추출 
-    best_params2 = wma_results_df.iloc[0]
-    best_wma_weights = int(best_params2["Window Size"])
-    best_wma_type = best_params2["Weight Type"]
-
-    # Train 데이터 Loss 그래프와 데이터프레임 나란히 배치 (3:7 비율)
+    # **Ag-Grid로 데이터프레임 및 초기 선택**
     col_wma_table, col_wma_chart = st.columns([3, 7])
 
     with col_wma_table:
-        # st.dataframe(wma_results_df.style.apply(lambda x: ['color: green' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
-        st.dataframe(
-            wma_results_df.style
-            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
-            .hide(axis='index'),  # 인덱스 숨기기
-            use_container_width=True
-        )
-        
+        gb = GridOptionsBuilder.from_dataframe(wma_results_df)
+        gb.configure_selection('multiple', use_checkbox=True)
+        gb.configure_default_column(resizable=True, autoSize=True)
+        gb.configure_grid_options(domLayout='normal')  # 스크롤 가능하도록 설정
 
-    with col_wma_chart:
-        fig_wma = px.line(
+        # 첫 행 강조 (lightgreen 배경)
+        custom_css = {
+            ".ag-row:first-child": {
+                "background-color": "lightgreen !important;"
+            }
+        }
+
+        grid_options = gb.build()
+
+        # 상위 5개 초기 선택
+        initial_selection = wma_results_df.head(5).to_dict('records')
+        grid_response = AgGrid(
             wma_results_df,
-            x="Window Size",
-            y="Loss",
-            color="Weight Type",
-            title="WMA Loss by Window Size and Weight Type",
-            labels={"Window Size": "Window Size", "Loss": f"{loss_function}"},
+            gridOptions=grid_options,
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            allow_unsafe_jscode=True,
+            theme='streamlit',
+            selected_rows=initial_selection,
+            custom_css=custom_css
         )
-        st.plotly_chart(fig_wma, use_container_width=True)
-        
-    # 최적 파라미터 적용하여 Test 데이터 예측
-    best_wma_weights = int(best_params2["Window Size"])
-    best_wma_type = best_params2["Weight Type"]
 
-    # 최적 가중치 생성
-    if best_wma_type == "Linear":
-        weights = np.arange(1, best_wma_weights + 1).astype(float)
-    elif best_wma_type == "Reverse":
-        weights = np.arange(best_wma_weights, 0, -1).astype(float)
-    elif best_wma_type == "Exponential":
-        k = 0.5  # 감쇠 계수
-        weights = np.exp(-k * (best_wma_weights - np.arange(1, best_wma_weights + 1))).astype(float)
-    elif best_wma_type == "Triangular":
-        weights = 1 - np.abs(np.linspace(-1, 1, best_wma_weights))
-    weights /= weights.sum()  # 가중치 정규화
+        # 선택된 데이터 가져오기
+        selected_rows = grid_response['selected_rows']
+        selected_results = pd.DataFrame(selected_rows)
 
-    # Test 데이터에 가중 이동평균 적용
-    test_weighted_moving_avg = test_data.rolling(window=best_wma_weights).apply(
-        lambda x: np.dot(x, weights), raw=True
-    )
+    # **그래프 시각화**
+    with col_wma_chart:
+        fig = go.Figure()
 
-    # Test 데이터 손실 계산
-    valid_test_indices = ~test_weighted_moving_avg.isna()
-    if valid_test_indices.sum() > 0:
-        test_actual = test_data[valid_test_indices]
-        test_predicted = test_weighted_moving_avg[valid_test_indices]
+        # 상위 5개 데이터 시각화 (점선)
+        for _, row in wma_results_df.head(5).iterrows():
+            window_size = int(row['Window Size'])
+            weight_type = row['Weight Type']
 
-        # Loss 계산
-        if loss_function == "RMSE":
-            test_loss = np.sqrt(mean_squared_error(test_actual, test_predicted))
-        elif loss_function == "MSE":
-            test_loss = mean_squared_error(test_actual, test_predicted)
-        elif loss_function == "MAE":
-            test_loss = mean_absolute_error(test_actual, test_predicted)
-        elif loss_function == "MAPE":
-            test_loss = mean_absolute_percentage_error(test_actual, test_predicted)
-        elif loss_function == "R2":
-            test_loss = r2_score(test_actual, test_predicted)
+            # WMA 계산
+            weights = None
+            if weight_type == "Linear":
+                weights = np.arange(1, window_size + 1).astype(float)
+            elif weight_type == "Reverse":
+                weights = np.arange(window_size, 0, -1).astype(float)
+            elif weight_type == "Exponential":
+                k = 0.5
+                weights = np.exp(-k * (window_size - np.arange(1, window_size + 1))).astype(float)
+            elif weight_type == "Triangular":
+                weights = 1 - np.abs(np.linspace(-1, 1, window_size))
 
-        # 결과 출력
-        st.write(f"Best Parameters: Window Size={best_wma_weights}")
-        st.write(f"Best Parameters: Weight Type={best_wma_type}")
-        st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
+            weights /= weights.sum()  # 가중치 정규화
+
+            test_wma = test_data.rolling(window=window_size).apply(
+                lambda x: np.dot(x, weights[:len(x)]), raw=True
+            )
+
+            fig.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=test_wma,
+                mode="lines+markers",
+                name=f"Default WMA Window: {window_size}, Weight: {weight_type}",
+                line=dict(dash="dot")  # 점선으로 표시
+            ))
+
+        # 선택된 데이터 추가 시각화 (실선)
+        for _, row in selected_results.iterrows():
+            window_size = int(row['Window Size'])
+            weight_type = row['Weight Type']
+
+            # WMA 계산
+            weights = None
+            if weight_type == "Linear":
+                weights = np.arange(1, window_size + 1).astype(float)
+            elif weight_type == "Reverse":
+                weights = np.arange(window_size, 0, -1).astype(float)
+            elif weight_type == "Exponential":
+                k = 0.5
+                weights = np.exp(-k * (window_size - np.arange(1, window_size + 1))).astype(float)
+            elif weight_type == "Triangular":
+                weights = 1 - np.abs(np.linspace(-1, 1, window_size))
+
+            weights /= weights.sum()  # 가중치 정규화
+
+            test_wma = test_data.rolling(window=window_size).apply(
+                lambda x: np.dot(x, weights[:len(x)]), raw=True
+            )
+
+            fig.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=test_wma,
+                mode="lines+markers",
+                name=f"WMA Window: {window_size}, Weight: {weight_type}",
+                line=dict(dash="dot")
+            ))
+
+        # 테스트 데이터 추가 (검정색 실선)
+        fig.add_trace(go.Scatter(
+            x=dates[train_size:],
+            y=test_data,
+            mode="lines",
+            name="Test Data",
+            line=dict(color="black", dash="solid")
+        ))
+
+        # 그래프 설정
+        fig.update_layout(
+            title="WMA Loss by Window Size and Weight Type",
+            xaxis_title="Date",
+            yaxis_title=f"{loss_function}",
+            legend_title="Weight Type"
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # **최적 파라미터 출력**
+    best_params2 = wma_results_df.iloc[0]
+    st.write(f"Best Window Size: {int(best_params2['Window Size'])}")
+    st.write(f"Best Weight Type: {best_params2['Weight Type']}")
 
 
+ 
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+    import numpy as np
+    import pandas as pd
+    import plotly.graph_objects as go
+    import streamlit as st  
 
     # **7. 지수평활 (Exponential Smoothing) 파라미터 선택 및 Loss Function 계산**
     st.markdown("<h3 style='font-size:20px; color:black;'>Exponential Smoothing Parameters</h3>", unsafe_allow_html=True)
@@ -648,13 +755,16 @@ def visualize_smoothing(data):
         max_alpha = st.number_input("Maximum Alpha", min_value=min_alpha, max_value=1.0, value=0.5, step=0.01)
     with col_alpha_step:
         alpha_step = st.number_input("Alpha Step", min_value=0.01, max_value=1.0, value=0.01, step=0.01)
-
-    es_results = []
+ 
+    # Generate alpha values
     alpha_values = np.arange(min_alpha, max_alpha + alpha_step, alpha_step)
 
-    # 모델 학습
+    # Placeholder for ES results
+    es_results = []
+
+    # Calculate Loss for Each Alpha
     for alpha in alpha_values:
-        train_es = train_data.ewm(alpha=alpha, adjust=False).mean()
+        train_es = train_data.ewm(alpha=alpha, adjust=False).mean().shift(-1)
         valid_indices = ~train_es.isna()
 
         if valid_indices.sum() == 0:
@@ -672,64 +782,103 @@ def visualize_smoothing(data):
         elif loss_function == "MAPE":
             loss = mean_absolute_percentage_error(actual, predicted)
         elif loss_function == "R2":
-            loss = r2_score(actual, predicted)  
+            loss = r2_score(actual, predicted)
+
         es_results.append({"Alpha": alpha, "Loss": loss})
 
-    # 결정계수면 역으로
+    # Sort Results
     if loss_function == 'R2':
         es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=False)
     else:
         es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=True)
-        
-    # es_results_df = pd.DataFrame(es_results).sort_values(by="Loss", ascending=True)
-    es_results_df["Alpha"] = es_results_df["Alpha"].round(2) 
 
-    # Train 데이터 Loss 그래프와 데이터프레임 나란히 배치 (3:7 비율)
+    es_results_df["Alpha"] = es_results_df["Alpha"].round(2)
+
+    # Display Results with AgGrid
     col_es_table, col_es_chart = st.columns([3, 7])
 
     with col_es_table:
-        # st.dataframe(es_results_df.style.apply(lambda x: ['color: green; font-weight: bold' if i == 0 else '' for i in range(len(x))],axis=0).hide(axis='index'), use_container_width=True)
-        st.dataframe(
-            es_results_df.style
-            .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
-            .hide(axis='index'),  # 인덱스 숨기기
-            use_container_width=True
-        )
+        gb = GridOptionsBuilder.from_dataframe(es_results_df)
+        gb.configure_selection('multiple', use_checkbox=True)
+        gb.configure_default_column(resizable=True, autoSize=True)
+        gb.configure_grid_options(domLayout='normal')
         
+        # **첫 행 강조 (lightgreen 배경색 설정)**
+        custom_css = {
+            ".ag-row:first-child": {
+                "background-color": "lightgreen !important;"
+            }
+        }
 
-        
-    with col_es_chart:
-        fig_es = px.line(
+        initial_selection = es_results_df.head(5).to_dict('records')
+        grid_response = AgGrid(
             es_results_df,
-            x="Alpha",
-            y="Loss",
+            gridOptions=gb.build(),
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            allow_unsafe_jscode=True,
+            theme='streamlit',
+            custom_css = custom_css,
+            selected_rows=initial_selection
+        )
+
+        selected_rows = grid_response['selected_rows']
+        selected_results = pd.DataFrame(selected_rows)
+
+    # Plot Results
+    with col_es_chart:
+        fig_es = go.Figure()
+
+        # Plot top 5 results (dotted line)
+        for _, row in es_results_df.head(5).iterrows():
+            alpha = row['Alpha']
+            test_es = test_data.ewm(alpha=alpha, adjust=False).mean()
+
+            fig_es.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=test_es,
+                mode="lines+markers",
+                name=f"Alpha: {alpha:.2f} (Default)",
+                line=dict(dash="dot")
+            ))
+
+        # Plot selected results (solid line)
+        for _, row in selected_results.iterrows():
+            alpha = row['Alpha']
+            test_es = test_data.ewm(alpha=alpha, adjust=False).mean()
+
+            fig_es.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=test_es,
+                mode="lines+markers",
+                name=f"Alpha: {alpha:.2f} (Selected)",
+                line=dict(dash="dot")
+            ))
+
+        # Plot test data (black solid line)
+        fig_es.add_trace(go.Scatter(
+            x=dates[train_size:],
+            y=test_data,
+            mode="lines",
+            name="Test Data",
+            line=dict(color="black", dash="solid")
+        ))
+
+        # Update layout
+        fig_es.update_layout(
             title="Exponential Smoothing Loss by Alpha",
-            labels={"Alpha": "Alpha", "Loss": f"{loss_function}"},
-        ) 
-        st.plotly_chart(fig_es, use_container_width=True) 
-        
-    # Test 데이터에 ES 적용 및 손실 계산
-    best_alpha = es_results_df.iloc[0]['Alpha']  # 최적 Alpha 값 추출
-    test_es = test_data.ewm(alpha=best_alpha, adjust=False).mean()  # 최적 Alpha를 이용해 지수평활법 적용
-    valid_test_es_indices = ~test_es.isna()  # 유효 데이터 확인
+            xaxis_title="Date",
+            yaxis_title=f"{loss_function}",
+            legend_title="Alpha Values"
+        )
 
-    if valid_test_es_indices.sum() > 0:
-        test_actual_es = test_data[valid_test_es_indices]
-        test_predicted_es = test_es[valid_test_es_indices]
+        st.plotly_chart(fig_es, use_container_width=True)
 
-        if loss_function == "RMSE":
-            test_es_loss = np.sqrt(mean_squared_error(test_actual_es, test_predicted_es))
-        elif loss_function == "MSE":
-            test_es_loss = mean_squared_error(test_actual_es, test_predicted_es)
-        elif loss_function == "MAE":
-            test_es_loss = mean_absolute_error(test_actual_es, test_predicted_es)
-        elif loss_function == "MAPE":
-            test_es_loss = mean_absolute_percentage_error(test_actual_es, test_predicted_es)
-        elif loss_function == "R2":
-            test_es_loss = r2_score(test_actual_es, test_predicted_es)
+    # Best Parameters Output
+    best_alpha = es_results_df.iloc[0]['Alpha']
+    st.write(f"Best Parameters for ES: Alpha={best_alpha}")
 
-        st.write(f"Best Parameters for ES: Alpha={best_alpha}")
-        st.write(f"Test Loss for ES ({loss_function}): {test_es_loss:.4f}")
+    
+    
     
     import pandas as pd
     import numpy as np 
@@ -739,17 +888,27 @@ def visualize_smoothing(data):
     import plotly.graph_objects as go
     import streamlit as st  
 
-    # **8. ARIMA **
+            
+    
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+    import numpy as np
+    import pandas as pd
+    import plotly.graph_objects as go 
+    import streamlit as st
+    from statsmodels.tsa.arima.model import ARIMA
+    from sklearn.metrics import mean_squared_error, mean_absolute_error, mean_absolute_percentage_error, r2_score
+
+    # ARIMA Parameters
     st.markdown("<h3 style='font-size:20px; color:black;'>ARIMA Parameters (Rolling Update)</h3>", unsafe_allow_html=True)
 
-    # ARIMA 파라미터 범위 설정
+    # ARIMA parameter ranges
     col_p_range, col_q_range = st.columns(2)
     with col_p_range:
         max_p = st.number_input("Maximum AR term (p)", min_value=0, max_value=10, value=3, step=1)
     with col_q_range:
         max_q = st.number_input("Maximum MA term (q)", min_value=0, max_value=10, value=3, step=1)
 
-    # transform_option에 따른 d 값 설정
+    # Setting differencing order (d)
     if 'transform_option' in locals() and transform_option == "original data":
         d = 0
     elif 'transform_option' in locals() and transform_option == "1st differencing":
@@ -757,102 +916,163 @@ def visualize_smoothing(data):
     elif 'transform_option' in locals() and transform_option == "2nd differencing":
         d = 2
     else:
-        d = 1  # 기본적으로 1차 차분을 사용
+        d = 1
 
-    # AIC 결과 저장을 위한 리스트
+    # Placeholder for ARIMA results
     aic_results = []
 
-    # 학습 데이터로 ARIMA 모델 학습
+    # Train ARIMA models and calculate AIC and loss
     with st.spinner("Training ARIMA model..."):
         for p in range(max_p + 1):
             for q in range(max_q + 1):
                 try:
                     model = ARIMA(train_data, order=(p, d, q))
                     fitted_model = model.fit()
-                    # 각 파라미터 조합에서 AIC 값을 수집
-                    aic_value = fitted_model.aic
-                    aic_results.append({"p": p, "q": q, "AIC": aic_value})
-                except Exception as e:
-                    aic_results.append({"p": p, "q": q, "AIC": np.nan})
+                    forecast = fitted_model.forecast(steps=len(test_data))
 
-    # AIC 결과를 데이터프레임으로 정리
+                    # Calculate loss
+                    if loss_function == "RMSE":
+                        loss = np.sqrt(mean_squared_error(test_data, forecast))
+                    elif loss_function == "MSE":
+                        loss = mean_squared_error(test_data, forecast)
+                    elif loss_function == "MAE":
+                        loss = mean_absolute_error(test_data, forecast)
+                    elif loss_function == "MAPE":
+                        loss = mean_absolute_percentage_error(test_data, forecast)
+                    elif loss_function == "R2":
+                        loss = r2_score(test_data, forecast)
+
+                    aic_results.append({"p": p, "q": q, "AIC": fitted_model.aic, "Loss": loss})
+                except Exception as e:
+                    aic_results.append({"p": p, "q": q, "AIC": np.nan, "Loss": np.nan})
+
+    # Convert results to DataFrame
     aic_results_df = pd.DataFrame(aic_results).sort_values(by="AIC", ascending=True)
 
-    # AIC 결과를 시각화 및 출력
-    col_aic_table, col_aic_chart = st.columns([3, 7])
-    with col_aic_table:
-        #st.dataframe(aic_results_df.style.highlight_min(subset=['AIC'], color="lightgreen", axis=0).hide(axis='index'), use_container_width=True)
-        st.dataframe(
-    aic_results_df.style
-    .apply(lambda x: ['background-color: lightgreen; font-weight: bold' if i == 0 else '' for i in range(len(x))], axis=0)
-    .hide(axis='index'),  # 인덱스 숨기기
-    use_container_width=True
-)
+    # Display ARIMA results with AgGrid
+    col_results_table, col_results_chart = st.columns([3, 7])
 
+    with col_results_table:
+        gb = GridOptionsBuilder.from_dataframe(aic_results_df)
+        gb.configure_selection('multiple', use_checkbox=True)
+        gb.configure_default_column(resizable=True, autoSize=True)
+        gb.configure_grid_options(domLayout='normal')
+        
+        # **첫 행 강조 (lightgreen 배경색 설정)**
+        custom_css = {
+            ".ag-row:first-child": {
+                "background-color": "lightgreen !important;"
+            }
+        }
 
-    with col_aic_chart:
-        fig_aic = go.Figure()
-        fig_aic.add_trace(go.Scatter(
-            x=aic_results_df.index, y=aic_results_df['AIC'], mode="lines+markers",
-            name="AIC Values", line=dict(color="purple")
+        initial_selection = aic_results_df.head(3).to_dict('records')  # Select top 3 AIC models by default
+        grid_response = AgGrid(
+            aic_results_df,
+            gridOptions=gb.build(),
+            update_mode=GridUpdateMode.SELECTION_CHANGED,
+            allow_unsafe_jscode=True,
+            theme='streamlit',
+            custom_css = custom_css,
+            selected_rows=initial_selection
+        )
+
+        selected_rows = grid_response['selected_rows']
+        selected_results = pd.DataFrame(selected_rows)
+
+    # Perform rolling predictions
+    def forecast_one_step(fitted_model):
+        forecast = fitted_model.get_forecast(steps=1)
+        fc = forecast.predicted_mean.values[0]
+        return fc
+
+    # Plot predictions for selected models and rolling predictions
+    with col_results_chart:
+        fig = go.Figure()
+
+        # Plot test data
+        fig.add_trace(go.Scatter(
+            x=dates[train_size:], 
+            y=test_data, 
+            mode="lines", 
+            name="Test Data", 
+            line=dict(color="black")
         ))
-        fig_aic.update_layout(title="AIC Values by ARIMA Parameters",
-                            xaxis_title="Parameter Combination Index",
-                            yaxis_title="AIC Value")
-        st.plotly_chart(fig_aic, use_container_width=True)
 
-    # 최적 파라미터 선택
+        # Perform rolling predictions for top 3 models (default display)
+        for _, row in aic_results_df.head(3).iterrows():
+            p, q = int(row['p']), int(row['q'])
+            model = ARIMA(train_data, order=(p, d, q))
+            fitted_model = model.fit()
+
+            rolling_pred = []
+            rolling_model = fitted_model
+            for new_ob in test_data:
+                fc = forecast_one_step(rolling_model)
+                rolling_pred.append(fc)
+                rolling_model = rolling_model.append([new_ob], refit=False)
+
+            fig.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=rolling_pred,
+                mode="lines+markers",
+                name=f"ARIMA(p={p}, d={d}, q={q}) [Default]",
+                line=dict(dash="dot")
+            ))
+
+        # Perform rolling predictions for user-selected models
+        for _, row in selected_results.iterrows():
+            p, q = int(row['p']), int(row['q'])
+            model = ARIMA(train_data, order=(p, d, q))
+            fitted_model = model.fit()
+
+            rolling_pred = []
+            rolling_model = fitted_model
+            for new_ob in test_data:
+                fc = forecast_one_step(rolling_model)
+                rolling_pred.append(fc)
+                rolling_model = rolling_model.append([new_ob], refit=False)
+
+            fig.add_trace(go.Scatter(
+                x=dates[train_size:],
+                y=rolling_pred,
+                mode="lines+markers",
+                name=f"ARIMA(p={p}, d={d}, q={q}) [Selected]",
+                line=dict(dash="dot")
+            ))
+
+        # Update layout
+        fig.update_layout(
+            title="ARIMA Predictions with Rolling Updates",
+            xaxis_title="Date",
+            yaxis_title="Values",
+            legend_title="Models"
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Evaluate final model performance
     best_params = aic_results_df.iloc[0]
-    
-    # 성능 평가   
-    st.write(f"Best Parameters of ARIMA: p={best_params['p']}, d = {d}, q={best_params['q']}")
-    
-    # 최적 파라미터로 모델 학습
+    st.write(f"Best Parameters of ARIMA: p={best_params['p']}, d={d}, q={best_params['q']}")
+
     model = ARIMA(train_data, order=(int(best_params['p']), d, int(best_params['q'])))
     fitted_model = model.fit()
 
-    # one point forecast 함수 정의, 신뢰구간도 함께 담아보기
-    def forecast_one_step():
-        forecast = fitted_model.get_forecast(steps=1)
-        fc = forecast.predicted_mean.values[0]
-        conf = forecast.conf_int(alpha=0.05).values[0] 
-        return fc, conf
-
-    # 값들을 담을 빈 리스트 생성
     y_pred = []
-    pred_upper = []
-    pred_lower = []
-
-    # 테스트 데이터를 순차적으로 처리하며 예측 및 업데이트
-    for i, new_ob in enumerate(test_data):
-        # 예측 수행
-        fc, conf = forecast_one_step()
-        y_pred.append(fc)  # 예측값 추가 
-        pred_upper.append(conf[1])  # 신뢰구간 상단
-        pred_lower.append(conf[0])  # 신뢰구간 하단
-
-        # 모델 업데이트
+    for new_ob in test_data:
+        fc = forecast_one_step(fitted_model)
+        y_pred.append(fc)
         fitted_model = fitted_model.append([new_ob], refit=False)
+    '''
+    # Final rolling predictions
+    fig_final = go.Figure()
+    fig_final.add_trace(go.Scatter(x=dates[:train_size], y=train_data, mode="lines", name="Train Data", line=dict(color="blue")))
+    fig_final.add_trace(go.Scatter(x=dates[train_size:], y=test_data, mode="lines", name="Test Data", line=dict(color="orange")))
+    fig_final.add_trace(go.Scatter(x=dates[train_size:], y=y_pred, mode="lines", name="Rolling Predictions", line=dict(color="green")))
+    fig_final.update_layout(title="Final Rolling Predictions")
+    st.plotly_chart(fig_final, use_container_width=True)
+    '''
 
-    # 예측 결과를 데이터프레임으로 정리
-    test_pred = pd.DataFrame({"Test": test_data, "Predicted": y_pred})
-    y_pred_series = test_pred["Predicted"]  # Series 형태로 변환
-
-    # 시각화 
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=dates[:train_size], y=train_data, mode="lines", name="Train Data", line=dict(color="blue")))
-    fig.add_trace(go.Scatter(x=dates[train_size:], y=test_data, mode="lines", name="Test Data", line=dict(color="orange")))
-    fig.add_trace(go.Scatter(x=dates[train_size:], y=y_pred, mode="lines", name="Predicted", line=dict(color="green")))
-
-    # 신뢰구간 시각화
-    fig.add_trace(go.Scatter(x=dates[train_size:], y=pred_upper, mode="lines", name="Prediction Upper", line=dict(color="lightgreen", dash="dot")))
-    fig.add_trace(go.Scatter(x=dates[train_size:], y=pred_lower, mode="lines", name="Prediction Lower", line=dict(color="lightgreen", dash="dot")))
-    
-    fig.update_layout(title="ARIMA prediction",)
-
-    st.plotly_chart(fig, use_container_width=True)
-
-    # 성능 평가
+    # Calculate loss for the best model
     if loss_function == "RMSE":
         test_loss = np.sqrt(mean_squared_error(test_data, y_pred))
     elif loss_function == "MSE":
@@ -863,10 +1083,10 @@ def visualize_smoothing(data):
         test_loss = mean_absolute_percentage_error(test_data, y_pred)
     elif loss_function == "R2":
         test_loss = r2_score(test_data, y_pred)
-        
-    # st.write(f"Best Parameters of ARIMA: p={best_params['p']}, d = {d}, q={best_params['q']}, Test Loss {loss_function}: {test_loss:.4f}")
+
     st.write(f"Test Loss ({loss_function}): {test_loss:.4f}")
-    # st.markdown(f"<h4>Test Loss ({loss_function}): {test_loss:.4f}</h4>", unsafe_allow_html=True)
+        
+
 
 
 
@@ -1165,7 +1385,7 @@ def main():
     show_stock_name(stock)
     st.divider()
 
-    # <2> Raw Data 불러오기
+    # <2> Raw Data 불러오기 
     st.markdown("<h3 style='font-size:30px; color:blue;'>Raw Data</h3>", unsafe_allow_html=True)
     data = load_data(stock)
 
@@ -1284,5 +1504,3 @@ if __name__ == "__main__":
     
     
     
-     
-     
