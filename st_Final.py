@@ -1,3 +1,8 @@
+##########################################
+### streamlit 실행 ###
+##########################################
+
+
 import streamlit as st
 import EDA_Final
 import Stock_Final
