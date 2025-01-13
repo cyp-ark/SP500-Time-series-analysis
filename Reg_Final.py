@@ -1,13 +1,21 @@
+##########################################
+### Regression(예측 모델) 파트 구현 ###
+##########################################
+
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.linear_model import LinearRegression, Ridge, Lasso, SGDRegressor
+import xgboost as xgb
+
 from plotly.subplots import make_subplots
 import plotly.express as px
 import plotly.graph_objects as go
 import plotly.figure_factory as ff
+
 def load_data(stock):
     data = yf.download(stock)
     data.columns = [' '.join(col)[:-(len(stock)+1)] for col in data.columns]
@@ -15,6 +23,7 @@ def load_data(stock):
     
     data['Date'] = pd.to_datetime(data['Date'])
     return data
+
 def show_stock_name(symbol):
     try:
         stock_name = yf.Ticker(symbol).info['longName']
@@ -25,6 +34,7 @@ def show_stock_name(symbol):
             """, unsafe_allow_html=True)
     except KeyError:
         return "종목 코드가 잘못되었거나 이름을 찾을 수 없습니다."
+
 def LR_analysis(data, train_date_range, test_data_range, log=False, method="linear", alpha=0.1):
     if 'index' not in data.columns:
         data.reset_index(drop=False, inplace=True)
@@ -68,7 +78,57 @@ def LR_analysis(data, train_date_range, test_data_range, log=False, method="line
     fig.add_trace(go.Scatter(x=X_test.flatten(), y=(y_test_pred), mode='lines', name='Test Pred'))
         
     return fig, mse_train, mse_test, r2_train, r2_test
+
+def create_windows_with_labels(data, window_size):
+    X, y = [], []
+    for i in range(len(data) - window_size):
+        X.append(data[i:i+window_size])  # 윈도우 데이터
+        y.append(data[i+window_size])   # 윈도우 다음 값
+    return np.array(X), np.array(y)
+
+def xgboost_analysis(data, train_date_range, test_data_range, window_size=5, log=False):
+    X, y = create_windows_with_labels(data['Close'], window_size)
+    
+    train_date_range = [pd.to_datetime(date) for date in train_date_range]
+    test_data_range = [pd.to_datetime(date) for date in test_data_range]
+    
+    X_train = X[:-len(data[data["Date"] >= test_data_range[0]])]
+    y_train = y[:-len(data[data["Date"] >= test_data_range[0]])]
+    X_test = X[-len(data[data["Date"] >= test_data_range[0]]):]
+    y_test = y[-len(data[data["Date"] >= test_data_range[0]]):]
+    
+    if log:
+        y_train = np.log1p(y_train)
+        y_test = np.log1p(y_test)
+    
+    model = xgb.XGBRegressor()
+    model.fit(X_train, y_train)
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
+    
+    if log:
+        y_train = np.expm1(y_train)
+        y_test = np.expm1(y_test)
+        y_train_pred = np.expm1(y_train_pred)
+        y_test_pred = np.expm1(y_test_pred)
+    
+    mse_train = mean_squared_error(y_train, y_train_pred)
+    mse_test = mean_squared_error(y_test, y_test_pred)
+    
+    r2_train = r2_score(y_train, y_train_pred)
+    r2_test = r2_score(y_test, y_test_pred)
+    
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=data.index[window_size:], y=(y), mode='lines', name='Train'))
+    fig.add_trace(go.Scatter(x=data.index[window_size:], y=(model.predict(X)), mode='lines', name='Train Pred'))
+    fig.add_trace(go.Scatter(x=data.index[-len(y_test):], y=(y_test), mode='lines', name='Test'))
+    fig.add_trace(go.Scatter(x=data.index[-len(y_test):], y=(y_test_pred), mode='lines', name='Test Pred'))
+    
+    return fig, mse_train, mse_test, r2_train, r2_test
+    
+    
         
+
 def main():
     stock = st.sidebar.text_input("주식 코드를 입력하세요", value='^GSPC')
     
@@ -116,10 +176,10 @@ def main():
             st.write(f"Train MSE: {mse_train:.2f}, Test MSE: {mse_test:.2f}")
             st.write(f"Train R2: {r2_train:.2f}, Test R2: {r2_test:.2f}")
             st.plotly_chart(fig)
-             
+            
             ######################
             ### Ridge and Lasso
-            ###################### 
+            ######################
             st.subheader("Lasso Regression")
             fig, mse_train_lasso, mse_test_lasso, r2_train_lasso, r2_test_lasso = LR_analysis(data, train_date_range, test_data_range, log=log, method="lasso")
             st.write(f"Train MSE: {mse_train_lasso:.2f}, Test MSE: {mse_test_lasso:.2f}")
@@ -132,14 +192,14 @@ def main():
             st.write(f"Train R2: {r2_train:.2f}, Test R2: {r2_test:.2f}")
             st.plotly_chart(fig)
             
-            st.subheader("SGD Regression")
-            fig, mse_train, mse_test, r2_train, r2_test = LR_analysis(data, train_date_range, test_data_range, log=log, method="sgd")
-            st.write(f"Train MSE: {mse_train:.2f}, Test MSE: {mse_test:.2f}")
-            st.write(f"Train R2: {r2_train:.2f}, Test R2: {r2_test:.2f}")
+            st.subheader("XGBoost")
+            window_size = st.sidebar.slider("Window Size", min_value=2, max_value=30, value=5, key="window_size")
+            fig, mse_train_xgb, mse_test_xgb, r2_train_xgb, r2_test_xgb = xgboost_analysis(data, train_date_range, test_data_range, window_size=window_size, log=log)
+            st.write(f"Train MSE: {mse_train_xgb:.2f}, Test MSE: {mse_test_xgb:.2f}")
+            st.write(f"Train R2: {r2_train_xgb:.2f}, Test R2: {r2_test_xgb:.2f}")
             st.plotly_chart(fig)
             
-            
-            
         
+
 if __name__ == "__main__":
     main()
