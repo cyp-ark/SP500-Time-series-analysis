@@ -1,3 +1,9 @@
+##########################################
+### EDA 파트 구현 ###
+##########################################
+
+
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -1029,9 +1035,9 @@ def visualize_smoothing(data):
                     elif loss_function == "R2":
                         loss = r2_score(test_data, forecast)
 
-                    aic_results.append({"p": p, "q": q, "AIC": fitted_model.aic, "Loss": loss})
+                    aic_results.append({"p": p, "q": q, "AIC": fitted_model.aic}) 
                 except Exception as e:
-                    aic_results.append({"p": p, "q": q, "AIC": np.nan, "Loss": np.nan})
+                    aic_results.append({"p": p, "q": q, "AIC": np.nan})  
 
     # Convert results to DataFrame
     aic_results_df = pd.DataFrame(aic_results).sort_values(by="AIC", ascending=True)

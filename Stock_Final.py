@@ -1,3 +1,8 @@
+##########################################
+### Stock 파트(주가 창 시각화) 구현 ###
+##########################################
+
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -289,3 +294,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
