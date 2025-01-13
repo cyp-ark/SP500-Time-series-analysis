@@ -1,3 +1,9 @@
+##########################################
+### EDA 파트 구현 ###
+##########################################
+
+
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
