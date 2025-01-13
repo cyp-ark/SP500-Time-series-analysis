@@ -121,7 +121,64 @@ def xgboost_analysis(data, train_date_range, test_data_range, window_size=5, log
     
     return fig, mse_train, mse_test, r2_train, r2_test
     
+def xgboost_analysis_diff(data, train_date_range, test_data_range, window_size=5):
+    train_date_range = [pd.to_datetime(date) for date in train_date_range]
+    test_data_range = [pd.to_datetime(date) for date in test_data_range]
     
+    data = data[['Date', 'Close']]
+    data['Close_pct'] = data['Close'].pct_change()
+    data.fillna(0, inplace=True)
+
+    # 윈도우 생성 함수
+    def create_windows_with_labels(data, window_size):
+        X, y = [], []
+        for i in range(len(data) - window_size):
+            X.append(data[i:i+window_size])  # 윈도우 데이터
+            y.append(data[i+window_size])   # 윈도우 다음 값
+        return np.array(X), np.array(y)
+
+    # 윈도우 데이터 생성
+    X, y = create_windows_with_labels(data['Close_pct'], window_size)
+
+    # 훈련 및 테스트 데이터 분리
+    X_train = X[:-len(data[data["Date"] >= test_data_range[0]])]
+    y_train = y[:-len(data[data["Date"] >= test_data_range[0]])]
+    X_test = X[-len(data[data["Date"] >= test_data_range[0]]):]
+    y_test = y[-len(data[data["Date"] >= test_data_range[0]]):]
+
+    # 모델 학습
+    model = xgb.XGBRegressor()
+    model.fit(X_train, y_train)
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
+
+    # 예측값 데이터 추가
+    data_train = data[data["Date"] < test_data_range[0]]
+    data_train.loc[window_size:, 'Close_diff_pred'] = y_train_pred
+    data_train['Close_pred'] = data_train['Close'].shift(1) * (1 + data_train['Close_diff_pred'])
+
+    data_test = data[data["Date"] >= test_data_range[0]]
+    data_test['Close_diff_pred'] = y_test_pred
+    data_test['Close_pred'] = data_test['Close'].shift(1) * (1 + data_test['Close_diff_pred'])
+    data_test['Close_pred'].iloc[0] = data_train['Close'].iloc[-1] * (1 + data_test['Close_diff_pred'].iloc[0])
+
+    # 성능 평가
+    mse_train = mean_squared_error(data_train['Close'][window_size:], data_train['Close_pred'][window_size:])
+    mse_test = mean_squared_error(data_test['Close'], data_test['Close_pred'])
+    r2_train = r2_score(data_train['Close'][window_size:], data_train['Close_pred'][window_size:])
+    r2_test = r2_score(data_test['Close'], data_test['Close_pred'])
+
+    print(f"Train MSE: {mse_train}, Test MSE: {mse_test}")
+    print(f"Train R2: {r2_train}, Test R2: {r2_test}")
+
+    # 시각화
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=data_train['Date'], y=data_train['Close'], mode='lines', name='Train'))
+    fig.add_trace(go.Scatter(x=data_train['Date'], y=data_train['Close_pred'], mode='lines', name='Train Pred'))
+    fig.add_trace(go.Scatter(x=data_test['Date'], y=data_test['Close'], mode='lines', name='Test'))
+    fig.add_trace(go.Scatter(x=data_test['Date'], y=data_test['Close_pred'], mode='lines', name='Test Pred'))
+    
+    return fig, mse_train, mse_test, r2_train, r2_test
         
 
 def main():
@@ -193,6 +250,13 @@ def main():
             st.write(f"Train MSE: {mse_train_xgb:.2f}, Test MSE: {mse_test_xgb:.2f}")
             st.write(f"Train R2: {r2_train_xgb:.2f}, Test R2: {r2_test_xgb:.2f}")
             st.plotly_chart(fig)
+            
+            st.subheader("XGBoost with Diff Rate")
+            fig, mse_train_xgb_diff, mse_test_xgb_diff, r2_train_xgb_diff, r2_test_xgb_diff = xgboost_analysis_diff(data, train_date_range, test_data_range, window_size=window_size)
+            st.write(f"Train MSE: {mse_train_xgb_diff:.2f}, Test MSE: {mse_test_xgb_diff:.2f}")
+            st.write(f"Train R2: {r2_train_xgb_diff:.2f}, Test R2: {r2_test_xgb_diff:.2f}")
+            st.plotly_chart(fig)
+            
             
         
 
