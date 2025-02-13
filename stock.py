@@ -4,7 +4,7 @@ import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-
+ 
 def load_data(stock):
     """데이터를 로드하고 전처리합니다."""
     data = yf.download(stock)
@@ -267,7 +267,7 @@ def main():
                         end_date = eday
         
 
-        if start_date > end_date:
+        if start_date > end_date: 
             st.error("오류: 시작 날짜는 종료 날짜보다 앞서야 합니다.")
         else:
             filtered_data = filter_data_by_date(data, start_date, end_date)
@@ -289,3 +289,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+ 
